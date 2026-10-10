@@ -1,71 +1,77 @@
 
-name: SecureGate AI - DevSecOps Pipeline
+name: SecureGate AI - Vulnerability Gate
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   pull_request:
-    branches:
-      - main
+    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  gate-scan-and-publish:
-    name: Build, Scan and Enforce Security Gate
+  vulnerability-gate:
+    name: Scan Public Docker Image
     runs-on: ubuntu-latest
 
-    permissions:
-      contents: read
-      packages: write
-
     steps:
+      # Step 1: Checkout repository
       - name: Checkout Source Code
         uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build Backend Container Image
-        run: |
-          docker build \
-            -f Dockerfile.backend \
-            -t securegate-local:${{ github.sha }} \
-            .
-
+      # Step 2: Install Trivy directly
       - name: Install Trivy
         run: |
           sudo apt-get update
-          sudo apt-get install -y wget ca-certificates
+          sudo apt-get install -y wget
           wget -q https://github.com/aquasecurity/trivy/releases/latest/download/trivy_0.69.3_Linux-64bit.deb -O trivy.deb
           sudo dpkg -i trivy.deb
           trivy --version
 
-      - name: Run Trivy Vulnerability Scanner
+      # Step 3: Scan a public Docker image
+      - name: Scan NGINX Image
+        continue-on-error: true
         run: |
           trivy image \
             --scanners vuln \
             --format json \
             --output trivy-results.json \
-            securegate-local:${{ github.sha }}
+            nginx:1.14.0
 
+      # Step 4: Ensure a scan report exists
+      - name: Verify Scan Report
+        if: always()
+        run: |
+          if [ ! -s trivy-results.json ]; then
+            echo "::error::Trivy did not produce a scan report."
+            exit 1
+          fi
+
+      # Step 5: Upload scan report
       - name: Upload Trivy Scan Results
         if: always() && hashFiles('trivy-results.json') != ''
         uses: actions/upload-artifact@v4
         with:
-          name: trivy-scan-results
+          name: securegate-trivy-report
           path: trivy-results.json
           retention-days: 7
 
+      # Step 6: Enforce SecureGate policy
       - name: SecureGate AI Policy Evaluation
+        if: always() && hashFiles('trivy-results.json') != ''
         run: |
           CRITICAL=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "CRITICAL")] | length' trivy-results.json)
           HIGH=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "HIGH")] | length' trivy-results.json)
 
+          echo "======================================"
+          echo "SecureGate AI Vulnerability Report"
+          echo "Image: nginx:1.14.0"
           echo "Critical vulnerabilities: $CRITICAL"
           echo "High vulnerabilities: $HIGH"
+          echo "Policy: Critical = 0, High <= 2"
+          echo "======================================"
 
           if [ "$CRITICAL" -gt 0 ]; then
             echo "::error::SECURITY GATE BLOCKED: Critical vulnerabilities exceed zero tolerance."
@@ -78,27 +84,3 @@ jobs:
           fi
 
           echo "SECURITY GATE PASSED"
-
-      - name: Log in to GitHub Container Registry
-        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Publish Approved Container Image
-        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
-        env:
-          IMAGE_TAG: ${{ github.sha }}
-        run: |
-          IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}/securegate-api"
-
-          docker tag \
-            "securegate-local:${IMAGE_TAG}" \
-            "${IMAGE}:${IMAGE_TAG}"
-
-          docker push "${IMAGE}:${IMAGE_TAG}"
-
-          echo "Approved image published:"
-          echo "${IMAGE}:${IMAGE_TAG}"
