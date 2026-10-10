@@ -32,7 +32,7 @@ jobs:
           docker build -t us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/quarantine-staging/app:${{ github.sha }} .
 
       - name: Run Trivy Vulnerability Scanner
-        uses: aquasecurity/trivy-action@0.33.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/quarantine-staging/app:${{ github.sha }}
           format: 'json'
@@ -68,4 +68,5 @@ jobs:
           service: securegate-api-service
           image: us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/release-images/app:${{ github.sha }}
           region: us-central1
+
 
