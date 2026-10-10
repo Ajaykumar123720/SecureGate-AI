@@ -65,7 +65,7 @@ jobs:
 
           echo "======================================"
           echo "SecureGate AI Vulnerability Report"
-          echo "Image: nginx:stable-alpine"
+          echo "Image: nginx:alpine"
           echo "Critical vulnerabilities: $CRITICAL"
           echo "High vulnerabilities: $HIGH"
           echo "Policy: Critical = 0, High <= 2"
