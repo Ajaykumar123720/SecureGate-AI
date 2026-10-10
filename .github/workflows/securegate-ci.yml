@@ -3,9 +3,11 @@ name: SecureGate AI - DevSecOps Pipeline
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
   pull_request:
-    branches: [main]
+    branches:
+      - main
 
 permissions:
   contents: read
@@ -20,26 +22,20 @@ jobs:
       packages: write
 
     steps:
-      # Step 1: Checkout project
       - name: Checkout Source Code
         uses: actions/checkout@v4
 
-      # Step 2: Prepare Docker
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # Step 3: Build container image
-       - name: Build Container Image
+      - name: Build Backend Container Image
         run: |
           docker build \
             -f Dockerfile.backend \
             -t securegate-local:${{ github.sha }} \
             .
 
-      # Step 4: Install Trivy directly
       - name: Install Trivy
-        env:
-          DEBIAN_FRONTEND: noninteractive
         run: |
           sudo apt-get update
           sudo apt-get install -y wget ca-certificates
@@ -47,7 +43,6 @@ jobs:
           sudo dpkg -i trivy.deb
           trivy --version
 
-      # Step 5: Scan the built container
       - name: Run Trivy Vulnerability Scanner
         run: |
           trivy image \
@@ -56,7 +51,6 @@ jobs:
             --output trivy-results.json \
             securegate-local:${{ github.sha }}
 
-      # Step 6: Save scan report even if the security gate blocks
       - name: Upload Trivy Scan Results
         if: always() && hashFiles('trivy-results.json') != ''
         uses: actions/upload-artifact@v4
@@ -65,17 +59,13 @@ jobs:
           path: trivy-results.json
           retention-days: 7
 
-      # Step 7: Evaluate security policy
       - name: SecureGate AI Policy Evaluation
         run: |
           CRITICAL=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "CRITICAL")] | length' trivy-results.json)
           HIGH=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "HIGH")] | length' trivy-results.json)
 
-          echo "======================================"
-          echo "SecureGate AI Security Report"
           echo "Critical vulnerabilities: $CRITICAL"
           echo "High vulnerabilities: $HIGH"
-          echo "======================================"
 
           if [ "$CRITICAL" -gt 0 ]; then
             echo "::error::SECURITY GATE BLOCKED: Critical vulnerabilities exceed zero tolerance."
@@ -89,7 +79,6 @@ jobs:
 
           echo "SECURITY GATE PASSED"
 
-      # Step 8: Authenticate to GitHub Container Registry
       - name: Log in to GitHub Container Registry
         if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: docker/login-action@v3
@@ -98,7 +87,6 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Step 9: Publish only after the gate passes
       - name: Publish Approved Container Image
         if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
