@@ -22,11 +22,13 @@ jobs:
         uses: actions/checkout@v4
 
       # Step 2: Install Trivy directly
+      
       - name: Install Trivy
         run: |
           sudo apt-get update
           sudo apt-get install -y wget
-          wget -q https://github.com/aquasecurity/trivy/releases/latest/download/trivy_0.69.3_Linux-64bit.deb -O trivy.deb
+          TRIVY_VERSION=$(wget -qO- https://api.github.com/repos/aquasecurity/trivy/releases/latest | jq -r .tag_name | sed 's/^v//')
+          wget -q "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.deb" -O trivy.deb
           sudo dpkg -i trivy.deb
           trivy --version
 
