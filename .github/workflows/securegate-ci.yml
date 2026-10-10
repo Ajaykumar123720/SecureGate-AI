@@ -17,12 +17,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # Step 1: Checkout repository
       - name: Checkout Source Code
         uses: actions/checkout@v4
 
-      # Step 2: Install Trivy directly
-      
       - name: Install Trivy
         run: |
           sudo apt-get update
@@ -32,17 +29,14 @@ jobs:
           sudo dpkg -i trivy.deb
           trivy --version
 
-      # Step 3: Scan a public Docker image
       - name: Scan NGINX Image
-        continue-on-error: true
         run: |
           trivy image \
             --scanners vuln \
             --format json \
             --output trivy-results.json \
-            nginx:1.14.0
+            nginx:stable-alpine
 
-      # Step 4: Ensure a scan report exists
       - name: Verify Scan Report
         if: always()
         run: |
@@ -51,7 +45,6 @@ jobs:
             exit 1
           fi
 
-      # Step 5: Upload scan report
       - name: Upload Trivy Scan Results
         if: always() && hashFiles('trivy-results.json') != ''
         uses: actions/upload-artifact@v4
@@ -60,7 +53,6 @@ jobs:
           path: trivy-results.json
           retention-days: 7
 
-      # Step 6: Enforce SecureGate policy
       - name: SecureGate AI Policy Evaluation
         if: always() && hashFiles('trivy-results.json') != ''
         run: |
@@ -69,7 +61,7 @@ jobs:
 
           echo "======================================"
           echo "SecureGate AI Vulnerability Report"
-          echo "Image: nginx:1.14.0"
+          echo "Image: nginx:stable-alpine"
           echo "Critical vulnerabilities: $CRITICAL"
           echo "High vulnerabilities: $HIGH"
           echo "Policy: Critical = 0, High <= 2"
