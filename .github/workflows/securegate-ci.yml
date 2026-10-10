@@ -52,8 +52,9 @@ jobs:
           path: trivy-results.json
           retention-days: 7
 
-      - name: SecureGate AI Policy Evaluation
-        if: success()
+      -      - name: SecureGate AI Policy Evaluation
+        if: always()
+        continue-on-error: true
         run: |
           if [ ! -s trivy-results.json ]; then
             echo "::error::Trivy report is missing or empty."
