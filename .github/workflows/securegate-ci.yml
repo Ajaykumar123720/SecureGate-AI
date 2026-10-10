@@ -42,17 +42,18 @@ jobs:
             --scanners vuln \
             --format json \
             --output trivy-results.json \
-            nginx:stable-alpine
+            nginx:alpine
 
       - name: Upload Trivy Scan Results
-        if: always() && hashFiles('trivy-results.json') != ''
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: securegate-trivy-report
           path: trivy-results.json
+          if-no-files-found: ignore
           retention-days: 7
 
-      -      - name: SecureGate AI Policy Evaluation
+      - name: SecureGate AI Policy Evaluation
         if: always()
         continue-on-error: true
         run: |
