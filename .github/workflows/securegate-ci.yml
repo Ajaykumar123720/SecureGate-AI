@@ -1,72 +1,94 @@
-name: SecureGate AI — DevSecOps Pipeline
+
+name: SecureGate AI - DevSecOps Pipeline
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
+
+permissions:
+  contents: read
 
 jobs:
-  gate-scan-and-deploy:
+  gate-scan-and-publish:
+    name: Build, Scan and Enforce Security Gate
     runs-on: ubuntu-latest
+
     permissions:
       contents: read
-      id-token: write
+      packages: write
 
     steps:
       - name: Checkout Source Code
         uses: actions/checkout@v4
 
-      - name: Authenticate to Google Cloud (Workload Identity)
-        uses: google-github-actions/auth@v2
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Container Image
+        run: |
+          docker build \
+            -t securegate-local:${{ github.sha }} \
+            .
+
+      - name: Install Trivy
+        uses: aquasecurity/setup-trivy@v0.2.4
         with:
-          project_id: ${{ secrets.GCP_PROJECT_ID }}
-          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
-
-      - name: Configure Docker for Google Artifact Registry
-        run: |
-          gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
-
-      - name: Build Container Image into Quarantine
-        run: |
-          docker build -t us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/quarantine-staging/app:${{ github.sha }} .
+          version: latest
 
       - name: Run Trivy Vulnerability Scanner
-        uses: aquasecurity/trivy-action@v0.36.0
+        run: |
+          trivy image \
+            --scanners vuln \
+            --format json \
+            --output trivy-results.json \
+            securegate-local:${{ github.sha }}
+
+      - name: Upload Trivy Scan Results
+        if: always() && hashFiles('trivy-results.json') != ''
+        uses: actions/upload-artifact@v4
         with:
-          image-ref: us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/quarantine-staging/app:${{ github.sha }}
-          format: 'json'
-          output: 'trivy-results.json'
+          name: trivy-scan-results
+          path: trivy-results.json
+          retention-days: 7
 
       - name: SecureGate AI Policy Evaluation
         run: |
-          CRITICAL=$(jq '[.Results[].Vulnerabilities[]? | select(.Severity == "CRITICAL")] | length' trivy-results.json)
-          HIGH=$(jq '[.Results[].Vulnerabilities[]? | select(.Severity == "HIGH")] | length' trivy-results.json)
-          
-          echo "Discovered Vulnerabilities: Critical=$CRITICAL, High=$HIGH"
-          
+          CRITICAL=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "CRITICAL")] | length' trivy-results.json)
+          HIGH=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "HIGH")] | length' trivy-results.json)
+
+          echo "Critical vulnerabilities: $CRITICAL"
+          echo "High vulnerabilities: $HIGH"
+
           if [ "$CRITICAL" -gt 0 ]; then
-            echo "::error::SECURITY GATE BLOCKED: $CRITICAL Critical CVEs exceed zero-tolerance threshold."
+            echo "::error::SECURITY GATE BLOCKED: Critical vulnerabilities exceed zero tolerance."
             exit 1
           fi
-          
+
           if [ "$HIGH" -gt 2 ]; then
-            echo "::error::SECURITY GATE BLOCKED: $HIGH High CVEs exceed threshold of 2."
+            echo "::error::SECURITY GATE BLOCKED: High vulnerabilities exceed threshold of 2."
             exit 1
           fi
-          
-          echo "Security Gate Passed: Image authorized for release."
 
-      - name: Promote Immutable Digest to Release Repository
-        run: |
-          docker tag us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/quarantine-staging/app:${{ github.sha }} us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/release-images/app:${{ github.sha }}
-          docker push us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/release-images/app:${{ github.sha }}
+          echo "SECURITY GATE PASSED"
 
-      - name: Deploy Approved Image to Google Cloud Run
-        uses: google-github-actions/deploy-cloudrun@v2
+      - name: Log in to GitHub Container Registry
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
         with:
-          service: securegate-api-service
-          image: us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/release-images/app:${{ github.sha }}
-          region: us-central1
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Publish Approved Container Image
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}/securegate-api"
 
+          docker tag "securegate-local:${IMAGE_TAG}" "${IMAGE}:${IMAGE_TAG}"
+          docker push "${IMAGE}:${IMAGE_TAG}"
+
+          echo "Approved image published: ${IMAGE}:${IMAGE_TAG}"
