@@ -23,10 +23,17 @@ jobs:
       - name: Install Trivy
         run: |
           sudo apt-get update
-          sudo apt-get install -y wget
-          TRIVY_VERSION=$(wget -qO- https://api.github.com/repos/aquasecurity/trivy/releases/latest | jq -r .tag_name | sed 's/^v//')
-          wget -q "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.deb" -O trivy.deb
-          sudo dpkg -i trivy.deb
+          sudo apt-get install -y wget gnupg ca-certificates
+
+          wget -qO- https://aquasecurity.github.io/trivy-repo/deb/public.key \
+            | gpg --dearmor \
+            | sudo tee /usr/share/keyrings/trivy.gpg > /dev/null
+
+          echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb generic main" \
+            | sudo tee /etc/apt/sources.list.d/trivy.list
+
+          sudo apt-get update
+          sudo apt-get install -y trivy
           trivy --version
 
       - name: Scan NGINX Image
@@ -37,14 +44,6 @@ jobs:
             --output trivy-results.json \
             nginx:stable-alpine
 
-      - name: Verify Scan Report
-        if: always()
-        run: |
-          if [ ! -s trivy-results.json ]; then
-            echo "::error::Trivy did not produce a scan report."
-            exit 1
-          fi
-
       - name: Upload Trivy Scan Results
         if: always() && hashFiles('trivy-results.json') != ''
         uses: actions/upload-artifact@v4
@@ -54,8 +53,13 @@ jobs:
           retention-days: 7
 
       - name: SecureGate AI Policy Evaluation
-        if: always() && hashFiles('trivy-results.json') != ''
+        if: success()
         run: |
+          if [ ! -s trivy-results.json ]; then
+            echo "::error::Trivy report is missing or empty."
+            exit 1
+          fi
+
           CRITICAL=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "CRITICAL")] | length' trivy-results.json)
           HIGH=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "HIGH")] | length' trivy-results.json)
 
