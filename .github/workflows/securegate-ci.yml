@@ -29,10 +29,11 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       # Step 3: Build container image
-      - name: Build Container Image
+       - name: Build Container Image
         run: |
           docker build \
-            --tag securegate-local:${{ github.sha }} \
+            -f Dockerfile.backend \
+            -t securegate-local:${{ github.sha }} \
             .
 
       # Step 4: Install Trivy directly
